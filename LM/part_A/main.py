@@ -1,4 +1,3 @@
-# main.py
 import torch
 
 from torch.utils.data import DataLoader
@@ -35,7 +34,7 @@ if __name__ == "__main__":
         print("Failure on dataset loading...")
         download_dataset_if_missing()
 
-        rain_raw = read_file(TRAINING_SET_DIR)
+        train_raw = read_file(TRAINING_SET_DIR)
         dev_raw = read_file(VALIDATION_SET_DIR)
         test_raw = read_file(TEST_SET_DIR)
         print("Successfully dataset loaded...")
@@ -61,38 +60,122 @@ if __name__ == "__main__":
         collate_fn=partial(collate_fn, tokenizer=tokenizer, device=DEVICE)
     )
 
-    # 2. Baseline configuration
-    baseline_config = {
+    # =========================================================================
+    # 1. STEP 0: Grid Search per il miglior Learning Rate
+    # =========================================================================
+    baseline_config_step0 = {
         "d_model": 128,
         "n_heads": 4,
         "num_layers": 2,
         "ff_dim": 512,
         "dropout": 0.0,
-        "use_weight_tying": False
+        "weight_tying": False
     }
 
-    # 3. Execution Grid Search
     learning_rates = [1e-2, 1e-3, 5e-4, 1e-4]
-    results = {}
+    step0_results = {}
 
     for lr in learning_rates:
         test_ppl = run_pipeline(
             lr=lr, 
-            config=baseline_config,
+            config=baseline_config_step0,
             train_loader=train_loader,
             dev_loader=dev_loader,
             test_loader=test_loader,
             vocab_len=len(tokenizer),
             pad_token_id=tokenizer.pad_token_id,
-            device=DEVICE
+            device=DEVICE,
+            number_step="0"
         )
-        results[lr] = test_ppl
+        step0_results[lr] = test_ppl
 
-    # 4. Results output
-    print()
+    print("\n" + "="*100)
+    print(" RISULTATI STEP 0 (GRID SEARCH LR)")
     print("="*100)
-    for lr, ppl in results.items():
+    for lr, ppl in step0_results.items():
         print(f"LR: {lr:<8} | PPL: {ppl:.2f}")
 
-    best_lr = min(results, key=results.get)
-    print(f"\nBest Learning Found = {best_lr} with PPL: {results[best_lr]:.2f}")
+    best_lr = min(step0_results, key=step0_results.get)
+    print(f"\nBest Learning Rate Found = {best_lr} con PPL: {step0_results[best_lr]:.2f}")
+
+
+    # =========================================================================
+    # 2. DEFINIZIONE DEGLI STEP SUCCESSIVI (Usando il best_lr)
+    # =========================================================================
+    
+    # Dizionario finale per raccogliere le PPL di tutti gli step
+    all_steps_results = {
+        "Step 0 (Baseline)": step0_results[best_lr]
+    }
+
+    # Definiamo la lista dei prossimi esperimenti
+    next_steps = [
+        {
+            "step_id": "1",
+            "name": "Step 1 (Dropout)",
+            "config": {
+                "d_model": 128,
+                "n_heads": 4,
+                "num_layers": 2,
+                "ff_dim": 512,
+                "dropout": 0.1,        # Aggiunta del dropout
+                "weight_tying": False
+            }
+        },
+        {
+            "step_id": "2",
+            "name": "Step 2 (Weight Tying)",
+            "config": {
+                "d_model": 128,
+                "n_heads": 4,
+                "num_layers": 2,
+                "ff_dim": 512,
+                "dropout": 0.1,
+                "weight_tying": True   # Attivazione Weight Tying
+            }
+        },
+        {
+            "step_id": "3",
+            "name": "Step 3 (Model Scaling)",
+            "config": {
+                "d_model": 256,        # Raddoppio della dimensione del modello
+                "n_heads": 8,
+                "num_layers": 4,
+                "ff_dim": 1024,
+                "dropout": 0.1,
+                "weight_tying": True
+            }
+        }
+    ]
+
+    # =========================================================================
+    # 3. ESECUZIONE CICLICA DEGLI STEP SUCCESSIVI
+    # =========================================================================
+    for step in next_steps:
+        print("\n" + "="*100)
+        print(f" Avvio {step['name']} con LR = {best_lr}")
+        print("="*100)
+
+        ppl = run_pipeline(
+            lr=best_lr,
+            config=step["config"],
+            train_loader=train_loader,
+            dev_loader=dev_loader,
+            test_loader=test_loader,
+            vocab_len=len(tokenizer),
+            pad_token_id=tokenizer.pad_token_id,
+            device=DEVICE,
+            number_step=step["step_id"]
+        )
+        
+        all_steps_results[step["name"]] = ppl
+
+    # =========================================================================
+    # 4. TABELLA RIASSUNTIVA DI TUTTI GLI STEP
+    # =========================================================================
+    print("\n" + "="*50)
+    print(" RIEPILOGO FINALE DI TUTTI GLI STEP")
+    print("="*50)
+    for step_name, ppl in all_steps_results.items():
+        print(f"{step_name:<25} | PPL Test: {ppl:.2f}")
+    print("="*50)
