@@ -41,3 +41,45 @@ def download_dataset_if_missing(dataset_dir=DATASET_DIR):
         if not os.path.exists(filepath):
             print(f"Downloading {filename}...")
             urllib.request.urlretrieve(url, filepath)
+
+def get_tokenizer():
+    tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+    tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+def load_data(tokenizer, batch_size=8):
+  try:       
+    train_raw = read_file(TRAINING_SET_DIR)
+    dev_raw = read_file(VALIDATION_SET_DIR)
+    test_raw = read_file(TEST_SET_DIR)
+    print("Successfully dataset loaded...")
+  except FileNotFoundError:
+    download_dataset_if_missing()
+    train_raw = read_file(TRAINING_SET_DIR)
+    dev_raw = read_file(VALIDATION_SET_DIR)
+    test_raw = read_file(TEST_SET_DIR)
+    print("Successfully dataset loaded...")
+      
+  train_dataset = PennTreeBank(train_raw)
+  dev_dataset = PennTreeBank(dev_raw)
+  test_dataset = PennTreeBank(test_raw)
+
+  train_loader = DataLoader(
+    train_dataset, 
+    batch_size=8, 
+    collate_fn=partial(collate_fn, tokenizer=tokenizer, device=DEVICE), 
+    shuffle=True
+  )
+
+  dev_loader = DataLoader(
+    dev_dataset, 
+    batch_size=16, 
+    collate_fn=partial(collate_fn, tokenizer=tokenizer, device=DEVICE)
+  )
+
+  test_loader = DataLoader(
+    test_dataset, 
+    batch_size=16, 
+    collate_fn=partial(collate_fn, tokenizer=tokenizer, device=DEVICE)
+  )
+  return train_loader, dev_loader, test_loader
